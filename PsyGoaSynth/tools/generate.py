@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+"""Generates Source/generated/ParamsGenerated.inc, PresetData.inc and Presets/*.json|md.
+
+Single source of truth for all plugin parameters and the 100 factory presets.
+Run from the repository root:   python3 tools/generate.py
+"""
+import json, math, os, random
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+DIV   = ["4/1", "2/1", "1/1", "1/2", "1/4", "1/4.", "1/8", "1/8.", "1/8T", "1/16", "1/16.", "1/16T", "1/32"]
+GDIV  = ["1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T"]
+SCALES = ["Chromatic", "Phrygian", "Phrygian Dominant", "Double Harmonic", "Harmonic Minor",
+          "Natural Minor", "Persian", "Minor Pentatonic"]
+NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+LFOSH = ["Sine", "Triangle", "Saw Down", "Square"]
+FTYPE = ["Ladder LP24 (303)", "SVF LP12", "SVF BP", "SVF HP"]
+STAGES = ["4", "6", "8", "12"]
+
+# kind: f=float i=int b=bool c=choice
+PARAMS = []
+def P(id, name, kind, lo=0, hi=1, default=0, centre=None, choices=None, unit=""):
+    PARAMS.append(dict(id=id, name=name, kind=kind, lo=lo, hi=hi, default=default,
+                       centre=centre, choices=choices, unit=unit))
+
+# --- FM synth
+P("fm_ratio", "FM Ratio", "f", 0.25, 16, 2, 2, unit="x")
+P("fm_index", "FM Index", "f", 0, 12, 3, 3)
+P("fm_decay", "FM Decay", "f", 5, 3000, 300, 300, unit="ms")
+P("fm_fb", "FM Feedback", "f", 0, 1, 0)
+P("fm_level", "FM Level", "f", 0, 1, 1)
+P("saw_mix", "Saw Mix", "f", 0, 1, 0)
+P("saw_detune", "Saw Detune", "f", 0, 50, 12, unit="ct")
+P("sub_mix", "Sub Mix", "f", 0, 1, 0)
+P("transpose", "Transpose", "i", -24, 24, 0)
+P("scale", "Scale", "c", choices=SCALES, default=0)
+P("root", "Root Note", "c", choices=NOTES, default=0)
+# --- amp
+P("amp_a", "Attack", "f", 0.5, 4000, 2, 50, unit="ms")
+P("amp_d", "Decay", "f", 5, 4000, 300, 300, unit="ms")
+P("amp_s", "Sustain", "f", 0, 1, 0.7)
+P("amp_r", "Release", "f", 5, 6000, 120, 200, unit="ms")
+P("glide", "Glide", "f", 0, 500, 0, 80, unit="ms")
+P("mono", "Mono", "b", default=0)
+P("in_level", "Input Level", "f", 0, 1, 1)
+# --- acid filter
+P("filt_on", "Filter On", "b", default=1)
+P("filt_type", "Filter Type", "c", choices=FTYPE, default=0)
+P("cutoff", "Cutoff", "f", 20, 18000, 1200, 1000, unit="Hz")
+P("reso", "Resonance", "f", 0, 1, 0.4)
+P("filt_env", "Env Amount", "f", -1, 1, 0.5)
+P("filt_decay", "Env Decay", "f", 20, 3000, 250, 250, unit="ms")
+P("filt_drive", "Drive", "f", 0, 1, 0.2)
+P("lfo_depth", "LFO Depth", "f", 0, 1, 0)
+P("lfo_rate", "LFO Rate", "f", 0.05, 20, 1, 1.5, unit="Hz")
+P("lfo_sync", "LFO Sync", "b", default=1)
+P("lfo_div", "LFO Division", "c", choices=DIV, default=6)
+P("lfo_shape", "LFO Shape", "c", choices=LFOSH, default=0)
+# --- trance gate
+P("gate_on", "Gate On", "b", default=0)
+P("gate_div", "Gate Division", "c", choices=GDIV, default=2)
+P("gate_pattern", "Gate Pattern", "i", 0, 65535, 0xFFFF)
+P("gate_len", "Gate Steps", "i", 1, 16, 16)
+P("gate_depth", "Gate Depth", "f", 0, 1, 1)
+P("gate_smooth", "Gate Smooth", "f", 0.2, 30, 2, 3, unit="ms")
+# --- phaser
+P("ph_on", "Phaser On", "b", default=0)
+P("ph_mix", "Phaser Mix", "f", 0, 1, 0.5)
+P("ph_rate", "Phaser Rate", "f", 0.02, 10, 0.4, 0.5, unit="Hz")
+P("ph_sync", "Phaser Sync", "b", default=0)
+P("ph_div", "Phaser Division", "c", choices=DIV, default=1)
+P("ph_depth", "Phaser Depth", "f", 0, 1, 0.7)
+P("ph_fb", "Phaser Feedback", "f", -0.95, 0.95, 0.4)
+P("ph_stages", "Phaser Stages", "c", choices=STAGES, default=2)
+P("ph_center", "Phaser Center", "f", 100, 5000, 1000, 800, unit="Hz")
+# --- flanger
+P("fl_on", "Flanger On", "b", default=0)
+P("fl_mix", "Flanger Mix", "f", 0, 1, 0.5)
+P("fl_rate", "Flanger Rate", "f", 0.02, 10, 0.3, 0.5, unit="Hz")
+P("fl_sync", "Flanger Sync", "b", default=0)
+P("fl_div", "Flanger Division", "c", choices=DIV, default=1)
+P("fl_depth", "Flanger Depth", "f", 0, 1, 0.6)
+P("fl_fb", "Flanger Feedback", "f", -0.95, 0.95, 0.5)
+P("fl_delay", "Flanger Delay", "f", 0.3, 12, 3, 3, unit="ms")
+# --- ping-pong delay
+P("dl_on", "Delay On", "b", default=0)
+P("dl_mix", "Delay Mix", "f", 0, 1, 0.3)
+P("dl_sync", "Delay Sync", "b", default=1)
+P("dl_div", "Delay Division", "c", choices=DIV, default=7)
+P("dl_time", "Delay Time", "f", 20, 2000, 400, 400, unit="ms")
+P("dl_fb", "Delay Feedback", "f", 0, 0.95, 0.5)
+P("dl_cross", "Ping-Pong", "f", 0, 1, 1)
+P("dl_lowcut", "Delay Low Cut", "f", 20, 2000, 100, 200, unit="Hz")
+P("dl_hicut", "Delay High Cut", "f", 500, 18000, 6000, 4000, unit="Hz")
+# --- reverb
+P("rv_on", "Reverb On", "b", default=0)
+P("rv_mix", "Reverb Mix", "f", 0, 1, 0.2)
+P("rv_size", "Reverb Size", "f", 0, 1, 0.6)
+P("rv_damp", "Reverb Damping", "f", 0, 1, 0.5)
+P("rv_width", "Reverb Width", "f", 0, 1, 1)
+# --- master
+P("master_db", "Master", "f", -36, 6, -6, unit="dB")
+
+BY_ID = {p["id"]: p for p in PARAMS}
+DEFAULTS = {p["id"]: p["default"] for p in PARAMS}
+
+
+def fnum(x):
+    s = repr(float(x))
+    return s + "f"
+
+
+def emit_layout():
+    out = ["// AUTO-GENERATED by tools/generate.py - do not edit by hand.\n"]
+    for p in PARAMS:
+        pid = '{"%s", 1}' % p["id"]
+        k = p["kind"]
+        if k == "f":
+            out.append("{ juce::NormalisableRange<float> r (%s, %s);" % (fnum(p["lo"]), fnum(p["hi"])))
+            if p["centre"] is not None:
+                out.append("  r.setSkewForCentre (%s);" % fnum(p["centre"]))
+            out.append('  layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID %s, "%s", r, %s, '
+                       'juce::AudioParameterFloatAttributes().withLabel ("%s"))); }'
+                       % (pid, p["name"], fnum(p["default"]), p["unit"]))
+        elif k == "i":
+            out.append('layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID %s, "%s", %d, %d, %d));'
+                       % (pid, p["name"], p["lo"], p["hi"], p["default"]))
+        elif k == "b":
+            out.append('layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID %s, "%s", %s));'
+                       % (pid, p["name"], "true" if p["default"] else "false"))
+        else:
+            items = ", ".join('"%s"' % c for c in p["choices"])
+            out.append('layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID %s, "%s", '
+                       'juce::StringArray { %s }, %d));' % (pid, p["name"], items, p["default"]))
+    return "\n".join(out) + "\n"
+
+
+# ----------------------------------------------------------------------------------------------------------
+# Presets
+# ----------------------------------------------------------------------------------------------------------
+def pat(s):
+    assert len(s) == 16
+    return sum(1 << i for i, c in enumerate(s) if c == "x")
+
+PATTERNS = {
+    "offbeat16": pat(".x.x.x.x.x.x.x.x"),
+    "eighths":   pat("x.x.x.x.x.x.x.x."),
+    "3of4":      pat("xxx.xxx.xxx.xxx."),
+    "rolling":   pat("x.xxx.xxx.xxx.xx"),
+    "tresillo":  pat("x..x..x.x..x..x."),
+    "psy1":      pat("xx.xx.xx.xx.xx.x"),
+    "psy2":      pat("x..xx.x.x..xx.x."),
+    "stutter":   pat(".xx..xx..xx..xx."),
+    "block":     pat("xxxx....xxxx...."),
+    "gallop":    pat("x.xx.xx.x.xx.xx."),
+    "pairs":     pat("xx..xx..xx..xx.."),
+    "dotted":    pat("x..x..x..x..x..x"),
+}
+PAT_ALL = list(PATTERNS.values())
+
+PSY_ROOTS = [0, 2, 5, 6, 7, 9]   # C D F F# G A
+
+# Category templates. "base" overrides DEFAULTS, "pick" = per-preset random choices from lists.
+CATS = [
+    dict(name="Acid Lead", names=["Goa Squealer", "Acid Cobra", "Shiva Bubbles", "Dub Acid Rain", "Sadhu Scream",
+                                   "Kali Blowtorch", "Hippie Resin", "Oriental Acid", "Lotus Laser", "Sunrise Squelch"],
+         base=dict(fm_ratio=2, fm_index=3, fm_decay=400, fm_fb=0.2, saw_mix=0.3, amp_d=400, amp_s=0.6, amp_r=150,
+                   glide=60, mono=1, scale=2, filt_type=0, cutoff=900, reso=0.75, filt_env=0.6, filt_decay=300,
+                   filt_drive=0.4, lfo_depth=0.3, lfo_sync=1, lfo_div=6, ph_on=1, ph_mix=0.3, ph_rate=0.3,
+                   dl_on=1, dl_mix=0.35, dl_fb=0.45, dl_div=7, rv_on=1, rv_mix=0.2),
+         pick=dict(root=PSY_ROOTS, fm_ratio=[1, 2, 3, 4, 0.5], lfo_div=[5, 6, 7, 9], lfo_shape=[0, 1, 2],
+                   dl_div=[6, 7, 5])),
+    dict(name="Psy Bass", names=["Rolling Offbeat", "Full-On Rumble", "Dark Gravel", "Ganesh Groove", "Kick Slap Bass",
+                                  "Triplet Thunder", "Forest Pulse", "Pitch Dive", "Twilight Roll", "Night Bass 303"],
+         base=dict(fm_level=0.3, fm_index=1.5, fm_decay=120, saw_mix=0.8, saw_detune=8, sub_mix=0.6, mono=1,
+                   amp_a=0.5, amp_d=200, amp_s=0.8, amp_r=40, glide=15, scale=1, cutoff=400, reso=0.45,
+                   filt_env=0.5, filt_decay=150, filt_drive=0.5, gate_on=1, gate_div=2, gate_depth=1,
+                   gate_smooth=1.5, gate_len=16, rv_on=0),
+         pick=dict(root=PSY_ROOTS, gate_pattern=[PATTERNS[k] for k in ("offbeat16", "rolling", "psy1", "gallop", "psy2")],
+                   filt_type=[0, 0, 1], scale=[0, 1, 5])),
+    dict(name="FM Oriental", names=["Bazaar Bell", "Sitar Cyber", "Maharaja Lead", "Desert Glass", "Hijaz Laser",
+                                     "Cairo Metal", "Bhairav Beam", "Silk Road FM", "Ghazal Glitch", "Tabla Tears"],
+         base=dict(fm_index=5, fm_decay=600, fm_fb=0.3, fm_level=1, amp_a=1, amp_d=500, amp_s=0.7, amp_r=300,
+                   glide=30, scale=3, filt_type=1, cutoff=6000, reso=0.2, filt_env=0.3, filt_decay=400,
+                   filt_drive=0.1, dl_on=1, dl_mix=0.4, dl_fb=0.5, dl_div=7, rv_on=1, rv_mix=0.35, rv_size=0.7,
+                   ph_on=1, ph_mix=0.25, ph_sync=1, ph_div=1),
+         pick=dict(root=PSY_ROOTS, scale=[2, 3, 6, 1], fm_ratio=[1, 2, 3, 3.5, 4, 5, 7], mono=[0, 0, 1])),
+    dict(name="Gate Pad", names=["Chopped Cloud", "Stutter Aurora", "Pulse Choir", "Strobe Pad", "Moksha Wash",
+                                  "Gate Nebula", "Trance Fog", "Ritual Chop", "Lunar Gate", "Sunbeam Stutter"],
+         base=dict(fm_level=0.4, fm_index=1, fm_decay=1500, saw_mix=0.6, saw_detune=25, sub_mix=0.1,
+                   amp_a=400, amp_d=800, amp_s=0.8, amp_r=1500, scale=1, filt_type=1, cutoff=3500, reso=0.2,
+                   filt_env=0.1, filt_drive=0.1, gate_on=1, gate_div=2, gate_depth=1, gate_smooth=2,
+                   ph_on=1, ph_mix=0.4, ph_rate=0.15, dl_on=1, dl_mix=0.3, dl_fb=0.5, rv_on=1, rv_mix=0.5,
+                   rv_size=0.8),
+         pick=dict(root=PSY_ROOTS, gate_pattern=PAT_ALL, gate_div=[1, 2, 2, 3, 4, 5], scale=[1, 2, 4, 5])),
+    dict(name="Acid Bass", names=["Classic Squelch", "Slide Machine", "Screamer 303", "Wobble Frog", "Liquid Acid",
+                                   "Rubber Resonance", "Tweak Tower", "Squeak Temple", "Bubbling Brook", "Acid Rain Slide"],
+         base=dict(fm_level=0, saw_mix=1, saw_detune=0, sub_mix=0.2, mono=1, amp_a=0.5, amp_d=250, amp_s=0.5,
+                   amp_r=60, glide=70, scale=5, filt_type=0, cutoff=500, reso=0.8, filt_env=0.8, filt_decay=220,
+                   filt_drive=0.5, lfo_depth=0, dl_on=1, dl_mix=0.2, dl_fb=0.35, dl_div=7, rv_on=0),
+         pick=dict(root=PSY_ROOTS, scale=[0, 1, 5, 4], glide=[30, 70, 120], lfo_depth=[0, 0, 0.2, 0.4],
+                   lfo_div=[5, 6, 9], gate_on=[0, 0, 1], gate_pattern=PAT_ALL)),
+    dict(name="Phase Flange", names=["Spiral Jet", "Hallucination Sweep", "Mushroom Phase", "Liquid Flange", "Vortex Drift",
+                                      "Kaleido Swirl", "Wormhole", "Tape Trip", "Fractal Wash", "Cosmic Flanger"],
+         base=dict(fm_index=2, fm_decay=800, saw_mix=0.5, saw_detune=20, amp_a=60, amp_d=600, amp_s=0.8,
+                   amp_r=700, scale=2, filt_type=1, cutoff=4000, reso=0.3, filt_env=0.2, lfo_depth=0.2,
+                   ph_on=1, ph_mix=0.7, ph_depth=0.9, ph_fb=0.7, ph_sync=1, ph_div=1, ph_stages=3,
+                   fl_on=1, fl_mix=0.6, fl_depth=0.8, fl_fb=0.7, fl_sync=1, fl_div=2,
+                   dl_on=1, dl_mix=0.25, rv_on=1, rv_mix=0.3),
+         pick=dict(root=PSY_ROOTS, ph_div=[0, 1, 2, 3], fl_div=[1, 2, 3], ph_stages=[1, 2, 3],
+                   ph_fb=[-0.7, 0.5, 0.8], fl_fb=[-0.6, 0.6, 0.85], scale=[1, 2, 3])),
+    dict(name="PingPong Lead", names=["Bounce Bell", "Echo Tennis", "Stereo Ricochet", "Dotted Dreams", "Ping Pong Pluck",
+                                       "Ricochet Raga", "Wide Open Echo", "Delay Dervish", "Orbit Echo", "Boomerang Lead"],
+         base=dict(fm_ratio=3, fm_index=4, fm_decay=250, fm_fb=0.15, amp_d=300, amp_s=0.3, amp_r=250, scale=2,
+                   filt_type=1, cutoff=7000, reso=0.25, filt_env=0.3, filt_decay=300, dl_on=1, dl_mix=0.55,
+                   dl_fb=0.65, dl_cross=1, dl_div=7, dl_hicut=7000, rv_on=1, rv_mix=0.3, rv_size=0.75),
+         pick=dict(root=PSY_ROOTS, dl_div=[4, 5, 6, 7, 9, 10], fm_ratio=[1, 2, 3, 4, 5], dl_fb=[0.55, 0.65, 0.75],
+                   scale=[1, 2, 3, 6])),
+    dict(name="Hypno Pluck", names=["Rubber Pluck", "Glass Drop", "Crystal Mallet", "Marimba Mind", "Tick Tock Trip",
+                                     "Bubble Pop", "Needle Pluck", "Wooden Spirit", "Kalimba Cyber", "Drip Drop Dub"],
+         base=dict(fm_ratio=4, fm_index=6, fm_decay=120, amp_a=0.5, amp_d=150, amp_s=0, amp_r=120, scale=1,
+                   filt_type=1, cutoff=5000, reso=0.3, filt_env=0.4, filt_decay=120, dl_on=1, dl_mix=0.4,
+                   dl_fb=0.55, dl_div=10, rv_on=1, rv_mix=0.2, gate_on=0),
+         pick=dict(root=PSY_ROOTS, fm_ratio=[1, 2, 3, 4, 5, 7, 8], dl_div=[9, 10, 6, 7], fm_decay=[60, 120, 200],
+                   gate_on=[0, 1], gate_pattern=PAT_ALL, scale=[1, 2, 5, 7])),
+    dict(name="Dark Forest", names=["Night Creature", "Black Moss", "Swamp Hum", "Owl Scream", "Elder Root",
+                                     "Crawling Fog", "Shadow Gate", "Fungus Grid", "Witching Hour", "Bone Whistle"],
+         base=dict(fm_ratio=1.41, fm_index=8, fm_decay=700, fm_fb=0.5, saw_mix=0.4, sub_mix=0.3, amp_a=5,
+                   amp_d=500, amp_s=0.7, amp_r=500, scale=1, filt_type=0, cutoff=700, reso=0.6, filt_env=0.5,
+                   filt_decay=500, filt_drive=0.7, lfo_depth=0.4, lfo_div=7, fl_on=1, fl_mix=0.4, fl_fb=0.6,
+                   fl_sync=1, fl_div=2, ph_on=1, ph_mix=0.4, dl_on=1, dl_mix=0.35, dl_fb=0.6, rv_on=1,
+                   rv_mix=0.45, rv_size=0.85),
+         pick=dict(root=[0, 1, 5, 6, 11], fm_ratio=[1.41, 2.76, 3.14, 1.73, 5.19], scale=[1, 3, 6, 4],
+                   lfo_div=[5, 6, 7, 9], lfo_shape=[0, 1, 2, 3], mono=[0, 1])),
+    dict(name="Atmosphere", names=["Temple Dawn", "Cosmic Ocean", "Space Ritual", "Aurora Drift", "Sky Burial",
+                                    "Third Eye Riser", "Void Whisper", "Lotus Cloud", "Cave of Echoes", "Final Sunrise"],
+         base=dict(fm_index=1.5, fm_decay=2500, fm_fb=0.1, saw_mix=0.4, saw_detune=30, amp_a=1800, amp_d=2000,
+                   amp_s=0.9, amp_r=4000, scale=1, filt_type=1, cutoff=1800, reso=0.35, filt_env=0, lfo_depth=0.6,
+                   lfo_div=0, lfo_shape=1, ph_on=1, ph_mix=0.5, ph_sync=1, ph_div=0, fl_on=1, fl_mix=0.3,
+                   fl_sync=1, fl_div=1, dl_on=1, dl_mix=0.4, dl_fb=0.7, dl_div=5, dl_hicut=4500, rv_on=1,
+                   rv_mix=0.6, rv_size=0.95, rv_damp=0.4),
+         pick=dict(root=PSY_ROOTS, lfo_div=[0, 1, 2, 3], lfo_shape=[0, 1, 2], scale=[1, 2, 3, 6], dl_div=[4, 5, 7])),
+]
+
+
+def clampp(pid, v):
+    p = BY_ID[pid]
+    k = p["kind"]
+    if k == "b":
+        return 1 if v else 0
+    if k in ("i", "c"):
+        lo, hi = (p["lo"], p["hi"]) if k == "i" else (0, len(p["choices"]) - 1)
+        return int(max(lo, min(hi, round(v))))
+    return float(max(p["lo"], min(p["hi"], v)))
+
+
+def log_jit(rng, v, octaves):
+    return v * 2 ** rng.uniform(-octaves, octaves)
+
+def add_jit(rng, v, amt, lo=0.0, hi=1.0):
+    return max(lo, min(hi, v + rng.uniform(-amt, amt)))
+
+
+def make_preset(ci, i):
+    cat = CATS[ci]
+    rng = random.Random(7919 * (ci + 1) + 104729 * i)
+    p = dict(DEFAULTS)
+    p.update(cat["base"])
+    scale_j = 0.5 if i == 0 else 1.0                      # first preset of a category stays close to the template
+    for key, lst in cat["pick"].items():
+        if i > 0 or key in ("root",):
+            p[key] = lst[(i + rng.randrange(len(lst))) % len(lst)] if i > 0 else lst[0]
+    if "root" not in cat["pick"]:
+        p["root"] = rng.choice(PSY_ROOTS)
+    # multiplicative jitter
+    for key, o in (("cutoff", 1.0), ("fm_decay", 0.6), ("amp_d", 0.4), ("amp_r", 0.4), ("filt_decay", 0.5),
+                   ("fm_index", 0.5), ("amp_a", 0.5), ("glide", 0.4)):
+        if p[key] > 0:
+            p[key] = log_jit(rng, p[key], o * scale_j)
+    # additive jitter
+    for key, a, lo, hi in (("reso", 0.12, 0, 1), ("filt_env", 0.2, -1, 1), ("filt_drive", 0.15, 0, 1),
+                           ("fm_fb", 0.15, 0, 1), ("saw_mix", 0.15, 0, 1), ("dl_mix", 0.1, 0, 1),
+                           ("rv_mix", 0.1, 0, 1), ("ph_mix", 0.15, 0, 1), ("fl_mix", 0.12, 0, 1),
+                           ("lfo_depth", 0.15, 0, 1), ("amp_s", 0.12, 0, 1), ("ph_depth", 0.15, 0, 1),
+                           ("dl_fb", 0.1, 0, 0.9)):
+        p[key] = add_jit(rng, p[key], a * scale_j, lo, hi)
+    p["ph_rate"] = log_jit(rng, p["ph_rate"], 0.8)
+    p["fl_rate"] = log_jit(rng, p["fl_rate"], 0.8)
+    p["lfo_rate"] = log_jit(rng, p["lfo_rate"], 0.8)
+    p["gate_len"] = 16
+    p["master_db"] = -6.0
+    # bass-type presets are loud and dry; pads quieter
+    if cat["name"] in ("Gate Pad", "Atmosphere", "Phase Flange"):
+        p["master_db"] = -8.0
+    return {k: clampp(k, v) for k, v in p.items()}
+
+
+def main():
+    presets = []
+    for ci, cat in enumerate(CATS):
+        for i, nm in enumerate(cat["names"]):
+            presets.append(dict(name="%s | %s" % (cat["name"], nm), category=cat["name"], values=make_preset(ci, i)))
+    assert len(presets) == 100, len(presets)
+    assert len({p["name"] for p in presets}) == 100
+    assert len({json.dumps(p["values"], sort_keys=True) for p in presets}) == 100
+    for p in presets:
+        assert set(p["values"]) == set(BY_ID), "preset missing params"
+
+    gen = os.path.join(ROOT, "Source", "generated")
+    os.makedirs(gen, exist_ok=True)
+    with open(os.path.join(gen, "ParamsGenerated.inc"), "w") as f:
+        f.write(emit_layout())
+
+    lines = ["// AUTO-GENERATED by tools/generate.py - do not edit by hand."]
+    for p in presets:
+        ent = ",".join('{"%s",%s}' % (k, fnum(v)) for k, v in p["values"].items())
+        lines.append('{"%s","%s",{%s}},' % (p["name"], p["category"], ent))
+    with open(os.path.join(gen, "PresetData.inc"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+    os.makedirs(os.path.join(ROOT, "Presets"), exist_ok=True)
+    out = []
+    for p in presets:
+        v = dict(p["values"])
+        v["scale"] = SCALES[v["scale"]]; v["root"] = NOTES[v["root"]]
+        out.append(dict(name=p["name"], category=p["category"], values=v))
+    with open(os.path.join(ROOT, "Presets", "factory_presets.json"), "w") as f:
+        json.dump(out, f, indent=1)
+
+    md = ["# Factory presets (100)\n"]
+    for cat in CATS:
+        md.append("\n## %s\n" % cat["name"])
+        for p in presets:
+            if p["category"] == cat["name"]:
+                v = p["values"]
+                md.append("- **%s** — %s %s, filter %s, gate %s" % (
+                    p["name"].split(" | ")[1], NOTES[v["root"]], SCALES[v["scale"]], FTYPE[v["filt_type"]],
+                    "on" if v["gate_on"] else "off"))
+    with open(os.path.join(ROOT, "Presets", "PRESET_LIST.md"), "w") as f:
+        f.write("\n".join(md) + "\n")
+    print("OK: %d params, %d presets" % (len(PARAMS), len(presets)))
+
+
+if __name__ == "__main__":
+    main()

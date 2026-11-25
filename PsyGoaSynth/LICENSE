@@ -1,0 +1,15 @@
+PsyGoa Synth
+Copyright (C) 2026 PsyGoaLabs
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+Affero General Public License for more details.
+
+Full license text: https://www.gnu.org/licenses/agpl-3.0.txt
+(Tip: on GitHub use "Add file > Create new file > LICENSE" and pick the AGPL-3.0 template to insert the full text.)
+
+This project uses JUCE (https://juce.com), licensed under AGPLv3 / commercial terms.
